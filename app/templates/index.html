@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NetPulse</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+</head>
+<body>
+  <header class="top">
+    <h1><span class="pulse" aria-hidden="true"></span>NetPulse</h1>
+    <p class="tagline">Network toolkit</p>
+  </header>
+
+  <main>
+    <nav class="tabs" role="tablist">
+      <button role="tab" class="tab active" aria-selected="true" data-tab="subnet">Subnet</button>
+      <button role="tab" class="tab" aria-selected="false" data-tab="vlsm">VLSM</button>
+      <button role="tab" class="tab" aria-selected="false" data-tab="dns">DNS</button>
+      <button role="tab" class="tab" aria-selected="false" data-tab="uptime">Uptime</button>
+    </nav>
+
+    <section id="panel-subnet" class="panel" role="tabpanel">
+      <form id="form-subnet" class="row">
+        <label>CIDR <input name="cidr" value="192.168.10.0/26" required autocomplete="off"></label>
+        <button type="submit">Calculate</button>
+      </form>
+      <p class="error" hidden></p>
+      <div class="result"></div>
+    </section>
+
+    <section id="panel-vlsm" class="panel" role="tabpanel" hidden>
+      <form id="form-vlsm" class="row">
+        <label>Base network <input name="base" value="10.0.0.0/24" required autocomplete="off"></label>
+        <label>Hosts per subnet (comma separated)
+          <input name="hosts" value="50, 20, 10, 2" required autocomplete="off"></label>
+        <button type="submit">Plan</button>
+      </form>
+      <p class="error" hidden></p>
+      <div class="result"></div>
+    </section>
+
+    <section id="panel-dns" class="panel" role="tabpanel" hidden>
+      <form id="form-dns" class="row">
+        <label>Domain <input name="domain" value="example.com" required autocomplete="off"></label>
+        <label>Type
+          <select name="type">
+            <option>A</option><option>AAAA</option><option>MX</option>
+            <option>TXT</option><option>NS</option><option>CNAME</option>
+          </select>
+        </label>
+        <button type="submit">Look up</button>
+      </form>
+      <p class="error" hidden></p>
+      <div class="result"></div>
+    </section>
+
+    <section id="panel-uptime" class="panel" role="tabpanel" hidden>
+      <form id="form-uptime" class="row">
+        <label>URL <input name="url" type="url" value="https://example.com" required autocomplete="off"></label>
+        <button type="submit">Check</button>
+      </form>
+      <p class="error" hidden></p>
+      <div class="result"></div>
+      <h2>Recent checks</h2>
+      <div id="history"></div>
+    </section>
+  </main>
+
+  <footer>NetPulse <span id="version">…</span></footer>
+  <script src="{{ url_for('static', path='app.js') }}"></script>
+</body>
+</html>
