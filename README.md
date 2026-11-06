@@ -70,6 +70,8 @@ app/db.py           sqlite3 storage for check history
 app/ratelimit.py    in-memory sliding-window limiter
 app/templates/      Jinja2 page;  app/static/  JS + CSS
 tests/              one test file per module; DNS and HTTP are mocked
+.github/workflows/deploy.yml   CI/CD: test -> build/push to ECR -> deploy via SSM
+scripts/deploy-ec2.sh          runs on the instance: pull, swap container, health check, roll back
 ```
 
 ## Architecture (AWS deployment)
@@ -97,6 +99,77 @@ GitHub push ──► GitHub Actions ──(OIDC, no stored keys)──► IAM r
   Require IMDSv2 (hop limit 1) as defence in depth for the metadata service.
 - **Health**: the image `HEALTHCHECK` and the deploy step both use `/health`;
   `version` confirms which commit is live.
+
+## CI/CD setup
+
+`.github/workflows/deploy.yml` has three jobs:
+
+1. **test** (every PR and push): `ruff check .` and pytest with the 80% gate.
+2. **build** (push to `main`): assumes the AWS role via OIDC, builds the image with
+   `APP_VERSION=<commit sha>`, runs it and checks `/health` reports that sha, then
+   pushes `<registry>/<repo>:<sha>` to ECR.
+3. **deploy** (after build, `production` environment): sends `scripts/deploy-ec2.sh`
+   to the instance with SSM Run Command. The script logs in to ECR with the
+   instance role, pulls, replaces the container (`-p 80:8000`, `netpulse-data`
+   volume, `--restart unless-stopped`) and waits for `/health` to report the new
+   sha. If it doesn't, it **rolls back** to the previous image and the job fails.
+   Deploys never run in parallel (`concurrency`).
+
+### One-time AWS setup
+
+1. **ECR repository**, e.g. `netpulse` (tag immutability on, scan on push).
+2. **EC2 instance** (Amazon Linux 2023 has the SSM agent and AWS CLI): install and
+   start Docker (`dnf install -y docker && systemctl enable --now docker`); attach an
+   instance profile with `AmazonSSMManagedInstanceCore` and
+   `AmazonEC2ContainerRegistryReadOnly`; require IMDSv2; security group allows
+   inbound 80 only (no SSH needed).
+3. **GitHub OIDC provider** in IAM: `token.actions.githubusercontent.com`,
+   audience `sts.amazonaws.com`.
+4. **IAM role for GitHub** with this trust policy (the build job's subject is the
+   branch; the deploy job's subject is the environment):
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Principal": { "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com" },
+       "Action": "sts:AssumeRoleWithWebIdentity",
+       "Condition": {
+         "StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
+         "StringLike": { "token.actions.githubusercontent.com:sub": [
+           "repo:ZXithunf/networkapp:ref:refs/heads/main",
+           "repo:ZXithunf/networkapp:environment:production"
+         ] }
+       }
+     }]
+   }
+   ```
+
+   and this permissions policy:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       { "Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*" },
+       { "Effect": "Allow",
+         "Action": ["ecr:BatchCheckLayerAvailability", "ecr:InitiateLayerUpload",
+                    "ecr:UploadLayerPart", "ecr:CompleteLayerUpload", "ecr:PutImage",
+                    "ecr:BatchGetImage"],
+         "Resource": "arn:aws:ecr:<REGION>:<ACCOUNT_ID>:repository/netpulse" },
+       { "Effect": "Allow", "Action": "ssm:SendCommand",
+         "Resource": ["arn:aws:ssm:<REGION>::document/AWS-RunShellScript",
+                      "arn:aws:ec2:<REGION>:<ACCOUNT_ID>:instance/<INSTANCE_ID>"] },
+       { "Effect": "Allow", "Action": "ssm:GetCommandInvocation", "Resource": "*" }
+     ]
+   }
+   ```
+
+5. **GitHub repo settings**: create the `production` environment (add yourself as
+   a required reviewer if you want manual approval), then add Actions
+   **variables** (not secrets; none of these are sensitive): `AWS_REGION`,
+   `AWS_ROLE_ARN`, `ECR_REPOSITORY`, `EC2_INSTANCE_ID`.
 
 ## Security decisions
 
@@ -126,5 +199,8 @@ GitHub push ──► GitHub Actions ──(OIDC, no stored keys)──► IAM r
 - **Container**: slim base, no build tools, runs as non-root user `app`
   (uid 10001); only `/app/data` is writable. `.dockerignore` keeps tests, `.git`
   and local data out of the image.
+- **No long-lived cloud credentials**: GitHub uses OIDC to get short-lived role
+  credentials scoped to this repo; the instance uses its instance profile. No SSH
+  keys, no open port 22.
 - **Tests never touch the network**: a fixture blocks real socket connections and
   DNS/HTTP are mocked.
