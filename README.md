@@ -72,6 +72,8 @@ app/templates/      Jinja2 page;  app/static/  JS + CSS
 tests/              one test file per module; DNS and HTTP are mocked
 .github/workflows/deploy.yml   CI/CD: test -> build/push to ECR -> deploy via SSM
 scripts/deploy-ec2.sh          runs on the instance: pull, swap container, health check, roll back
+scripts/aws-setup.sh           creates the AWS resources (run once in CloudShell)
+scripts/aws-teardown.sh        deletes them all again
 ```
 
 ## Architecture (AWS deployment)
@@ -116,6 +118,21 @@ GitHub push ──► GitHub Actions ──(OIDC, no stored keys)──► IAM r
    Deploys never run in parallel (`concurrency`).
 
 ### One-time AWS setup
+
+**Quick way:** open AWS CloudShell and run
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ZXithunf/networkapp/main/scripts/aws-setup.sh | bash
+```
+
+It creates everything below (re-runnable) and prints the four GitHub variables to
+add. When you are finished, delete it all so nothing keeps using credits:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ZXithunf/networkapp/main/scripts/aws-teardown.sh | bash
+```
+
+**What the script does, step by step:**
 
 1. **ECR repository**, e.g. `netpulse` (tag immutability on, scan on push).
 2. **EC2 instance** (Amazon Linux 2023 has the SSM agent and AWS CLI): install and
